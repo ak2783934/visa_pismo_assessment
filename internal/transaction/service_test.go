@@ -54,106 +54,84 @@ func newMockTransactionRepository() *mockTransactionRepository {
 	return &mockTransactionRepository{Mock: &mock.Mock{}}
 }
 
-func TestService_CreateTransaction_Operation1NegativeAmount(t *testing.T) {
-	accountRepo := newMockAccountRepository()
-	accountRepo.On("GetByID", mock.Anything, int64(1)).
-		Return(&account.Account{ID: 1, DocumentNumber: "test"}, nil)
+func TestService_CreateTransaction(t *testing.T) {
+	tests := []struct {
+		name       string
+		req        CreateTransactionRequest
+		setup      func(*mockAccountRepository, *mockTransactionRepository)
+		wantErrIs  error
+		wantAmount float64
+	}{
+		{
+			name: "purchase stores negative amount",
+			req:  CreateTransactionRequest{AccountID: 1, OperationTypeID: OperationNormalPurchase, Amount: 100},
+			setup: func(ar *mockAccountRepository, tr *mockTransactionRepository) {
+				ar.On("GetByID", mock.Anything, int64(1)).Return(&account.Account{ID: 1}, nil)
+				tr.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					args[1].(*Transaction).ID = 1
+				}).Return(nil)
+			},
+			wantAmount: -100,
+		},
+		{
+			name: "credit voucher stores positive amount",
+			req:  CreateTransactionRequest{AccountID: 1, OperationTypeID: OperationCreditVoucher, Amount: 100},
+			setup: func(ar *mockAccountRepository, tr *mockTransactionRepository) {
+				ar.On("GetByID", mock.Anything, int64(1)).Return(&account.Account{ID: 1}, nil)
+				tr.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					args[1].(*Transaction).ID = 1
+				}).Return(nil)
+			},
+			wantAmount: 100,
+		},
+		{
+			name:      "zero amount rejected",
+			req:       CreateTransactionRequest{AccountID: 1, OperationTypeID: OperationNormalPurchase, Amount: 0},
+			setup:     func(*mockAccountRepository, *mockTransactionRepository) {},
+			wantErrIs: apperrors.ErrValidation,
+		},
+		{
+			name:      "negative amount rejected",
+			req:       CreateTransactionRequest{AccountID: 1, OperationTypeID: OperationNormalPurchase, Amount: -50},
+			setup:     func(*mockAccountRepository, *mockTransactionRepository) {},
+			wantErrIs: apperrors.ErrValidation,
+		},
+		{
+			name:      "invalid operation type",
+			req:       CreateTransactionRequest{AccountID: 1, OperationTypeID: 99, Amount: 100},
+			setup:     func(*mockAccountRepository, *mockTransactionRepository) {},
+			wantErrIs: apperrors.ErrInvalidOperationType,
+		},
+		{
+			name: "account not found",
+			req:  CreateTransactionRequest{AccountID: 1, OperationTypeID: OperationNormalPurchase, Amount: 100},
+			setup: func(ar *mockAccountRepository, _ *mockTransactionRepository) {
+				ar.On("GetByID", mock.Anything, int64(1)).Return(nil, apperrors.ErrNotFound)
+			},
+			wantErrIs: apperrors.ErrNotFound,
+		},
+	}
 
-	txRepo := newMockTransactionRepository()
-	txRepo.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		args[1].(*Transaction).ID = 1
-	}).Return(nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			accountRepo := newMockAccountRepository()
+			txRepo := newMockTransactionRepository()
+			tt.setup(accountRepo, txRepo)
 
-	svc := NewService(accountRepo, txRepo)
-	tx, err := svc.CreateTransaction(context.Background(), CreateTransactionRequest{
-		AccountID:       1,
-		OperationTypeID: OperationNormalPurchase,
-		Amount:          100,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, -100.0, tx.Amount)
-	assert.Equal(t, OperationNormalPurchase, tx.OperationTypeID)
-	accountRepo.AssertExpectations(t)
-	txRepo.AssertExpectations(t)
-}
+			svc := NewService(accountRepo, txRepo)
+			got, err := svc.CreateTransaction(context.Background(), tt.req)
 
-func TestService_CreateTransaction_Operation4PositiveAmount(t *testing.T) {
-	accountRepo := newMockAccountRepository()
-	accountRepo.On("GetByID", mock.Anything, int64(1)).
-		Return(&account.Account{ID: 1, DocumentNumber: "test"}, nil)
-
-	txRepo := newMockTransactionRepository()
-	txRepo.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		args[1].(*Transaction).ID = 1
-	}).Return(nil)
-
-	svc := NewService(accountRepo, txRepo)
-	tx, err := svc.CreateTransaction(context.Background(), CreateTransactionRequest{
-		AccountID:       1,
-		OperationTypeID: OperationCreditVoucher,
-		Amount:          100,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, 100.0, tx.Amount)
-	assert.Equal(t, OperationCreditVoucher, tx.OperationTypeID)
-	accountRepo.AssertExpectations(t)
-	txRepo.AssertExpectations(t)
-}
-
-func TestService_CreateTransaction_InvalidOperationType(t *testing.T) {
-	accountRepo := newMockAccountRepository()
-	txRepo := newMockTransactionRepository()
-
-	svc := NewService(accountRepo, txRepo)
-	_, err := svc.CreateTransaction(context.Background(), CreateTransactionRequest{
-		AccountID:       1,
-		OperationTypeID: 99,
-		Amount:          100,
-	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, apperrors.ErrInvalidOperationType)
-}
-
-func TestService_CreateTransaction_MissingAccount(t *testing.T) {
-	accountRepo := newMockAccountRepository()
-	accountRepo.On("GetByID", mock.Anything, int64(1)).
-		Return(nil, apperrors.ErrNotFound)
-
-	txRepo := newMockTransactionRepository()
-
-	svc := NewService(accountRepo, txRepo)
-	_, err := svc.CreateTransaction(context.Background(), CreateTransactionRequest{
-		AccountID:       1,
-		OperationTypeID: OperationNormalPurchase,
-		Amount:          100,
-	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, apperrors.ErrNotFound)
-	accountRepo.AssertExpectations(t)
-}
-
-func TestService_CreateTransaction_AmountNotPositive(t *testing.T) {
-	accountRepo := newMockAccountRepository()
-	txRepo := newMockTransactionRepository()
-
-	svc := NewService(accountRepo, txRepo)
-	ctx := context.Background()
-
-	_, err := svc.CreateTransaction(ctx, CreateTransactionRequest{
-		AccountID:       1,
-		OperationTypeID: OperationNormalPurchase,
-		Amount:          0,
-	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, apperrors.ErrValidation)
-
-	_, err = svc.CreateTransaction(ctx, CreateTransactionRequest{
-		AccountID:       1,
-		OperationTypeID: OperationNormalPurchase,
-		Amount:          -50,
-	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, apperrors.ErrValidation)
+			if tt.wantErrIs != nil {
+				require.ErrorIs(t, err, tt.wantErrIs)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantAmount, got.Amount)
+			assert.Equal(t, tt.req.OperationTypeID, got.OperationTypeID)
+			accountRepo.AssertExpectations(t)
+			txRepo.AssertExpectations(t)
+		})
+	}
 }
 
 func TestNormalizeAmount(t *testing.T) {
@@ -164,8 +142,10 @@ func TestNormalizeAmount(t *testing.T) {
 		want            float64
 		wantErr         bool
 	}{
-		{name: "normal purchase positive", operationTypeID: 1, input: 100, want: -100},
-		{name: "credit voucher positive", operationTypeID: 4, input: 100, want: 100},
+		{name: "normal purchase", operationTypeID: OperationNormalPurchase, input: 100, want: -100},
+		{name: "installment purchase", operationTypeID: OperationInstallmentPurchase, input: 200, want: -200},
+		{name: "withdrawal", operationTypeID: OperationWithdrawal, input: 50, want: -50},
+		{name: "credit voucher", operationTypeID: OperationCreditVoucher, input: 100, want: 100},
 		{name: "invalid operation type", operationTypeID: 99, input: 100, wantErr: true},
 	}
 

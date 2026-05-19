@@ -3,6 +3,7 @@ package account
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,91 +18,136 @@ import (
 
 func setupAccountRouter(repo Repository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-
 	svc := NewService(repo)
 	handler := NewHandler(svc)
-
 	router := gin.New()
 	handler.RegisterRoutes(router.Group("/v1"))
 	return router
 }
 
-func TestHandler_POST_Accounts_Returns201(t *testing.T) {
-	repo := newMockRepository()
-	repo.On("GetByDocumentNumber", mock.Anything, "12345678900").Return(nil, apperrors.ErrNotFound)
-	repo.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		args[1].(*Account).ID = 1
-	}).Return(nil)
-
-	router := setupAccountRouter(repo)
-
-	body, err := json.Marshal(CreateAccountRequest{DocumentNumber: "12345678900"})
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/accounts", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
-
-	var resp Account
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.NotZero(t, resp.ID)
-	assert.Equal(t, "12345678900", resp.DocumentNumber)
-	repo.AssertExpectations(t)
+func mustMarshal(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
-func TestHandler_GET_Accounts_Returns200(t *testing.T) {
-	repo := newMockRepository()
-	repo.On("GetByDocumentNumber", mock.Anything, "98765432100").Return(nil, apperrors.ErrNotFound)
-	repo.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		args[1].(*Account).ID = 1
-	}).Return(nil)
-	repo.On("GetByID", mock.Anything, int64(1)).Return(&Account{ID: 1, DocumentNumber: "98765432100"}, nil)
+func TestHandler_CreateAccount(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       []byte
+		setup      func(*mockRepository)
+		wantStatus int
+		checkBody  func(*testing.T, []byte)
+	}{
+		{
+			name: "success",
+			body: mustMarshal(CreateAccountRequest{DocumentNumber: "12345678900"}),
+			setup: func(r *mockRepository) {
+				r.On("GetByDocumentNumber", mock.Anything, "12345678900").Return(nil, apperrors.ErrNotFound)
+				r.On("Create", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					args[1].(*Account).ID = 1
+				}).Return(nil)
+			},
+			wantStatus: http.StatusCreated,
+			checkBody: func(t *testing.T, body []byte) {
+				var resp Account
+				require.NoError(t, json.Unmarshal(body, &resp))
+				assert.NotZero(t, resp.ID)
+				assert.Equal(t, "12345678900", resp.DocumentNumber)
+			},
+		},
+		{
+			name:       "invalid JSON",
+			body:       []byte(`{`),
+			setup:      func(*mockRepository) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "duplicate document number",
+			body: mustMarshal(CreateAccountRequest{DocumentNumber: "12345678900"}),
+			setup: func(r *mockRepository) {
+				r.On("GetByDocumentNumber", mock.Anything, "12345678900").
+					Return(&Account{ID: 1, DocumentNumber: "12345678900"}, nil)
+			},
+			wantStatus: http.StatusConflict,
+		},
+	}
 
-	router := setupAccountRouter(repo)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			tt.setup(repo)
 
-	createBody, err := json.Marshal(CreateAccountRequest{DocumentNumber: "98765432100"})
-	require.NoError(t, err)
+			router := setupAccountRouter(repo)
+			req := httptest.NewRequest(http.MethodPost, "/v1/accounts", bytes.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/accounts", bytes.NewReader(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	router.ServeHTTP(createRec, createReq)
-	require.Equal(t, http.StatusCreated, createRec.Code)
-
-	var created Account
-	require.NoError(t, json.Unmarshal(createRec.Body.Bytes(), &created))
-
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/accounts/"+jsonNumber(created.ID), nil)
-	getRec := httptest.NewRecorder()
-	router.ServeHTTP(getRec, getReq)
-
-	assert.Equal(t, http.StatusOK, getRec.Code)
-
-	var got Account
-	require.NoError(t, json.Unmarshal(getRec.Body.Bytes(), &got))
-	assert.Equal(t, created.ID, got.ID)
-	assert.Equal(t, created.DocumentNumber, got.DocumentNumber)
-	repo.AssertExpectations(t)
+			assert.Equal(t, tt.wantStatus, w.Code)
+			if tt.checkBody != nil {
+				tt.checkBody(t, w.Body.Bytes())
+			}
+			repo.AssertExpectations(t)
+		})
+	}
 }
 
-func TestHandler_InvalidPayload_Returns400(t *testing.T) {
-	repo := newMockRepository()
-	router := setupAccountRouter(repo)
+func TestHandler_GetAccount(t *testing.T) {
+	tests := []struct {
+		name       string
+		id         string
+		setup      func(*mockRepository)
+		wantStatus int
+		checkBody  func(*testing.T, []byte)
+	}{
+		{
+			name: "success",
+			id:   "1",
+			setup: func(r *mockRepository) {
+				r.On("GetByID", mock.Anything, int64(1)).Return(&Account{ID: 1, DocumentNumber: "12345678900"}, nil)
+			},
+			wantStatus: http.StatusOK,
+			checkBody: func(t *testing.T, body []byte) {
+				var resp Account
+				require.NoError(t, json.Unmarshal(body, &resp))
+				assert.Equal(t, int64(1), resp.ID)
+				assert.Equal(t, "12345678900", resp.DocumentNumber)
+			},
+		},
+		{
+			name: "not found",
+			id:   "999",
+			setup: func(r *mockRepository) {
+				r.On("GetByID", mock.Anything, int64(999)).Return(nil, apperrors.ErrNotFound)
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "invalid id",
+			id:         "abc",
+			setup:      func(*mockRepository) {},
+			wantStatus: http.StatusBadRequest,
+		},
+	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/accounts", bytes.NewReader([]byte(`{`)))
-	req.Header.Set("Content-Type", "application/json")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			tt.setup(repo)
 
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+			router := setupAccountRouter(repo)
+			req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/accounts/%s", tt.id), nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func jsonNumber(n int64) string {
-	b, _ := json.Marshal(n)
-	return string(b)
+			assert.Equal(t, tt.wantStatus, w.Code)
+			if tt.checkBody != nil {
+				tt.checkBody(t, w.Body.Bytes())
+			}
+			repo.AssertExpectations(t)
+		})
+	}
 }
