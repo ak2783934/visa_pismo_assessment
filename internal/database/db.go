@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	dbFile         = "data.db"
+	dbFile         = "data/data.db"
 	migrationFile  = "migrations/001_init.sql"
 )
 
