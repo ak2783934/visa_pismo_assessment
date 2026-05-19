@@ -1,0 +1,161 @@
+basePath: /v1
+definitions:
+  account.Account:
+    properties:
+      account_id:
+        example: 1
+        type: integer
+      document_number:
+        example: "12345678900"
+        type: string
+    type: object
+  account.CreateAccountRequest:
+    properties:
+      document_number:
+        example: "12345678900"
+        type: string
+    type: object
+  response.ErrorResponse:
+    properties:
+      error:
+        example: validation failed
+        type: string
+    type: object
+  transaction.CreateTransactionRequest:
+    properties:
+      account_id:
+        example: 1
+        type: integer
+      amount:
+        example: 100
+        type: number
+      operation_type_id:
+        example: 1
+        type: integer
+    type: object
+  transaction.Transaction:
+    properties:
+      account_id:
+        example: 1
+        type: integer
+      amount:
+        example: -100
+        type: number
+      event_date:
+        example: "2026-05-18T12:00:00Z"
+        type: string
+      operation_type_id:
+        example: 1
+        type: integer
+      transaction_id:
+        example: 1
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: REST API for managing accounts and financial transactions.
+  title: Visa/Pismo Assessment API
+  version: "1.0"
+paths:
+  /accounts:
+    post:
+      consumes:
+      - application/json
+      description: Create an account with a unique document number
+      parameters:
+      - description: Create account request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/account.CreateAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/account.Account'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Create account
+      tags:
+      - accounts
+  /accounts/{id}:
+    get:
+      description: Get account details by account ID
+      parameters:
+      - description: Account ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/account.Account'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Get account
+      tags:
+      - accounts
+  /transactions:
+    post:
+      consumes:
+      - application/json
+      description: Record a transaction. Amount sign is normalized by operation type
+        (1-3 negative, 4 positive).
+      parameters:
+      - description: Create transaction request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/transaction.CreateTransactionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/transaction.Transaction'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Create transaction
+      tags:
+      - transactions
+swagger: "2.0"
