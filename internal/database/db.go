@@ -4,18 +4,30 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const (
-	dbFile         = "data/data.db"
-	migrationFile  = "migrations/001_init.sql"
-)
+const migrationFile = "migrations/001_init.sql"
+
+func dbPath() string {
+	if p := os.Getenv("DB_PATH"); p != "" {
+		return p
+	}
+	return "data/data.db"
+}
 
 func Open() (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", dbFile)
+	path := dbPath()
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("create database directory: %w", err)
+		}
+	}
+
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}

@@ -58,13 +58,13 @@ visa-pismo-assessment/
 
 ## API
 
-Base URL: `http://localhost:8080`
+Base URL: `http://localhost:8080/v1`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/accounts` | Create account |
-| `GET` | `/accounts/:id` | Get account by ID |
-| `POST` | `/transactions` | Create transaction |
+| `POST` | `/v1/accounts` | Create account |
+| `GET` | `/v1/accounts/:id` | Get account by ID |
+| `POST` | `/v1/transactions` | Create transaction |
 
 ### Operation types
 
@@ -82,7 +82,7 @@ If the client sends a **positive** amount, the service normalizes it to the corr
 **Create account**
 
 ```bash
-curl -s -X POST http://localhost:8080/accounts \
+curl -s -X POST http://localhost:8080/v1/accounts \
   -H "Content-Type: application/json" \
   -d '{"document_number":"12345678900"}'
 ```
@@ -99,7 +99,7 @@ Response `201`:
 **Get account**
 
 ```bash
-curl -s http://localhost:8080/accounts/1
+curl -s http://localhost:8080/v1/accounts/1
 ```
 
 Response `200`:
@@ -114,7 +114,7 @@ Response `200`:
 **Create transaction (normal purchase)**
 
 ```bash
-curl -s -X POST http://localhost:8080/transactions \
+curl -s -X POST http://localhost:8080/v1/transactions \
   -H "Content-Type: application/json" \
   -d '{
     "account_id": 1,
@@ -138,13 +138,25 @@ Response `201` (amount stored as `-100`):
 **Credit voucher (positive amount)**
 
 ```bash
-curl -s -X POST http://localhost:8080/transactions \
+curl -s -X POST http://localhost:8080/v1/transactions \
   -H "Content-Type: application/json" \
   -d '{
     "account_id": 1,
     "operation_type_id": 4,
     "amount": 50
   }'
+```
+
+Response `201` (amount stored as `+50`):
+
+```json
+{
+  "transaction_id": 2,
+  "account_id": 1,
+  "operation_type_id": 4,
+  "amount": 50,
+  "event_date": "2026-05-18T12:00:00Z"
+}
 ```
 
 ### HTTP status codes
@@ -168,6 +180,18 @@ Regenerate specs after changing handler annotations:
 
 ```bash
 make swagger
+```
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_PATH` | `data/data.db` | Path to the SQLite database file |
+
+Copy `.env.example` to `.env` and adjust as needed. The `.env` file is gitignored; `.env.example` is committed as a reference.
+
+```bash
+cp .env.example .env
 ```
 
 ## How to run locally
@@ -203,7 +227,7 @@ Or:
 go test ./...
 ```
 
-Tests include unit tests (services with in-memory fakes) and HTTP handler tests (`httptest`).
+Tests use testify mocks for the repository layer and `httptest` for end-to-end handler coverage. All tests follow table-driven format.
 
 Format code:
 
